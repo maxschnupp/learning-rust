@@ -3,6 +3,8 @@ use std::path::Path;
 
 use rustfft::num_complex::Complex;
 use rustfft::FftPlanner;
+use ta::indicators::ExponentialMovingAverage;
+use ta::Next;
 use wav::BitDepth;
 
 fn read_wav_data(file_path: &str) -> Result<(wav::Header, wav::BitDepth), std::io::Error> {
@@ -31,7 +33,7 @@ fn process_complex_slice(
     return slice.to_vec();
 }
 
-//resizing the signal will simplify windowing, if you wanted to be exact you could trim the end off prior
+//resizing the signal will simplify windowing, if you wanted to be exact you could trim the end off in post
 fn resize_signal(signal: &Vec<f32>, window_size: usize) -> Vec<f32> {
     let signal_length = signal.len();
     let padding = signal_length % window_size;
@@ -41,8 +43,8 @@ fn resize_signal(signal: &Vec<f32>, window_size: usize) -> Vec<f32> {
 }
 
 fn main() {
-    const CUT_OFF: usize = 50;
-    const WINDOW_SIZE: usize = 2048;
+    const CUT_OFF: usize = 1200;
+    const WINDOW_SIZE: usize = 16384;
     //load wav file
     let (header, wav_data) =
         read_wav_data("./assets/drum-loop-102-bpm.wav").expect("reading file successful");
@@ -78,37 +80,19 @@ fn main() {
             .collect();
         output_signal.extend(window_processed);
     }
-    let write_bit_depth = BitDepth::ThirtyTwoFloat(output_signal);
+    //apply smoothing
+    let mut ema = ExponentialMovingAverage::new(16).unwrap();
+    let mut smoothed_output_signal: Vec<f32> = vec![];
+    for sample in output_signal {
+        let sample = sample as f64;
+        let exponential_moving_average = ema.next(sample) as f32;
+        smoothed_output_signal.push(exponential_moving_average)
+    }
+
+
+    let write_bit_depth = BitDepth::ThirtyTwoFloat(smoothed_output_signal);
     let mut out_file = File::create(Path::new("assets/output.wav")).expect("write file okay");
     wav::write(header, &write_bit_depth, &mut out_file).expect("write okay");
 }
 
 //SCRAP WORKINGS OUT THAT IM TOO SENTIMENTAL TO DELETE
-
-//get FFT
-
-// let buffer_size = buffer.len();
-// let mut planner: FftPlanner<f32> = FftPlanner::new();
-// let fft = planner.plan_fft_forward(buffer_size);
-// fft.process(buffer);
-// //set values to 0 above cut off in frequency domain
-// for i in CUT_OFF..buffer_size {
-//     println!("{}", i);
-//     buffer[i] = Complex { re: 0.0, im: 0.0 };
-// }
-// //fft back into time domain
-// let inverse_fft = planner.plan_fft_inverse(buffer_size);
-// inverse_fft.process(buffer);
-//convert back to real numbers
-// let transformed_signal_complex = buffer[..].to_vec();
-// println!("{}", transformed_signal_complex[0].im);
-// let transformed_signal: Vec<f32> = transformed_signal_complex
-//     .into_iter()
-//     .map(|x| x.re)
-//     .collect();
-// //normalise by 1/buffer_size
-// let normalised_transformed_signal: Vec<f32> = transformed_signal
-//     .into_iter()
-//     .map(|x| x / (buffer_size as f32))
-//     .collect();
-// //write to wav file
